@@ -227,6 +227,10 @@ class BroadlinkWebServer:
         # Initialize entity files to prevent configuration errors
         self._initialize_entity_files()
 
+        # Ensure configuration.yaml includes the broadlink_manager package
+        # so generated entities are automatically picked up by Home Assistant
+        self._ensure_package_include()
+
     def _initialize_entity_files(self):
         """
         Create placeholder entity files if they don't exist.
@@ -863,8 +867,35 @@ class BroadlinkWebServer:
                     results["success"] = False
                     results["message"] = "No entities configured"
 
-                # Reload configurations if we generated anything
+                # Ensure configuration.yaml includes the package, then reload
                 if results["total_count"] > 0:
+                    # Auto-ensure configuration.yaml includes our package
+                    include_result = self._ensure_package_include()
+                    if include_result.get("added"):
+                        results["config_yaml_updated"] = True
+                        results[
+                            "message"
+                        ] += " Added package include to configuration.yaml."
+                        logger.info(
+                            "✅ Auto-added broadlink_manager package include to configuration.yaml"
+                        )
+                    elif include_result.get("already_present"):
+                        logger.info(
+                            "configuration.yaml already includes broadlink_manager package"
+                        )
+                    elif include_result.get("instructions"):
+                        # Could not auto-add - include instructions in the result
+                        results["config_yaml_updated"] = False
+                        results["config_instructions"] = include_result["instructions"]
+                        if include_result.get("error"):
+                            logger.warning(
+                                f"Could not auto-add package include: {include_result['error']}"
+                            )
+                        else:
+                            logger.info(
+                                "User has !include_dir_named setup - providing instructions"
+                            )
+
                     logger.info("🔄 Reloading Broadlink configuration...")
                     reload_success = loop.run_until_complete(
                         self._reload_broadlink_config()
@@ -2358,6 +2389,35 @@ class BroadlinkWebServer:
                                                     ensure_ascii=False,
                                                 )
 
+                                            # Also mirror the write to codes/<platform>/ for SmartIR forks
+                                            # that read from codes/ instead of custom_codes/
+                                            codes_profile_path = (
+                                                profile_path.parent.parent.parent
+                                                / "codes"
+                                                / metadata["platform"]
+                                                / profile_path.name
+                                            )
+                                            try:
+                                                if codes_profile_path.parent.exists():
+                                                    with open(
+                                                        codes_profile_path,
+                                                        "w",
+                                                        encoding="utf-8",
+                                                    ) as f:
+                                                        json.dump(
+                                                            profile_data,
+                                                            f,
+                                                            indent=2,
+                                                            ensure_ascii=False,
+                                                        )
+                                                    logger.info(
+                                                        f"✅ Mirrored SmartIR profile update to codes/: {codes_profile_path}"
+                                                    )
+                                            except Exception as mirror_err:
+                                                logger.warning(
+                                                    f"⚠️ Could not mirror profile to codes/: {mirror_err}"
+                                                )
+
                                             logger.info(
                                                 f"✅ Updated SmartIR profile {metadata['device_code']}.json with code for {command_name}"
                                             )
@@ -2509,18 +2569,82 @@ class BroadlinkWebServer:
                                     f"❌ Timeout polling for {device_name}/{command_name} after {elapsed:.1f}s - marking as error"
                                 )
 
-                                # Update devices.json with error status
-                                device = self.device_manager.get_device(device_id)
-                                if (
-                                    device
-                                    and "commands" in device
-                                    and command_name in device["commands"]
-                                ):
-                                    device["commands"][command_name]["data"] = "error"
-                                    self.device_manager.update_device(device_id, device)
-                                    logger.error(
-                                        f"❌ Marked {device_name}/{command_name} as error in devices.json"
-                                    )
+                                # Check if this is a SmartIR profile
+                                if metadata and "smartir_profile" in metadata:
+                                    # SmartIR profile - update profile JSON file with error status
+                                    try:
+                                        profile_path = Path(metadata["smartir_profile"])
+                                        if profile_path.exists():
+                                            with open(
+                                                profile_path, "r", encoding="utf-8"
+                                            ) as f:
+                                                profile_data = json.load(f)
+
+                                            if "commands" not in profile_data:
+                                                profile_data["commands"] = {}
+                                            profile_data["commands"][
+                                                command_name
+                                            ] = "error"
+
+                                            with open(
+                                                profile_path, "w", encoding="utf-8"
+                                            ) as f:
+                                                json.dump(
+                                                    profile_data,
+                                                    f,
+                                                    indent=2,
+                                                    ensure_ascii=False,
+                                                )
+
+                                            # Mirror to codes/ as well
+                                            codes_profile_path = (
+                                                profile_path.parent.parent.parent
+                                                / "codes"
+                                                / metadata["platform"]
+                                                / profile_path.name
+                                            )
+                                            try:
+                                                if codes_profile_path.parent.exists():
+                                                    with open(
+                                                        codes_profile_path,
+                                                        "w",
+                                                        encoding="utf-8",
+                                                    ) as f:
+                                                        json.dump(
+                                                            profile_data,
+                                                            f,
+                                                            indent=2,
+                                                            ensure_ascii=False,
+                                                        )
+                                            except Exception as mirror_err:
+                                                logger.warning(
+                                                    f"⚠️ Could not mirror error status to codes/: {mirror_err}"
+                                                )
+
+                                            logger.error(
+                                                f"❌ Marked {command_name} as error in SmartIR profile {metadata['device_code']}.json"
+                                            )
+                                    except Exception as e:
+                                        logger.error(
+                                            f"❌ Error updating SmartIR profile with error status: {e}"
+                                        )
+                                else:
+                                    # Broadlink native device - update devices.json with error status
+                                    device = self.device_manager.get_device(device_id)
+                                    if (
+                                        device
+                                        and "commands" in device
+                                        and command_name in device["commands"]
+                                    ):
+                                        device["commands"][command_name][
+                                            "data"
+                                        ] = "error"
+                                        self.device_manager.update_device(
+                                            device_id, device
+                                        )
+                                        logger.error(
+                                            f"❌ Marked {device_name}/{command_name} as error in devices.json"
+                                        )
 
                                 # Don't re-add to pending list (failed)
                             else:
@@ -2535,6 +2659,7 @@ class BroadlinkWebServer:
                                         command_name,
                                         start_time,
                                         entity_id_for_deletion,
+                                        metadata,
                                     )
                                 )
                         except Exception as e:
@@ -2550,6 +2675,7 @@ class BroadlinkWebServer:
                                         command_name,
                                         start_time,
                                         entity_id_for_deletion,
+                                        metadata,
                                     )
                                 )
                         finally:
@@ -3337,6 +3463,166 @@ class BroadlinkWebServer:
                     entity_commands[cmd_name] = cmd_name
 
         return entity_commands
+
+    def _ensure_package_include(self) -> Dict[str, Any]:
+        """
+        Ensure configuration.yaml includes the broadlink_manager package.
+
+        If the include is missing, it is added automatically so that
+        generated entities are picked up by Home Assistant without
+        requiring the user to manually edit configuration.yaml.
+
+        Returns:
+            Dict with 'added' (bool), 'already_present' (bool),
+            'error' (str or None), and 'instructions' (str or None).
+        """
+        import re
+
+        result = {
+            "added": False,
+            "already_present": False,
+            "error": None,
+            "instructions": None,
+        }
+
+        try:
+            config_path = self.config_loader.get_config_path()
+            config_file = config_path / "configuration.yaml"
+
+            if not config_file.exists():
+                result["error"] = "configuration.yaml not found"
+                result["instructions"] = (
+                    "Add the following to your configuration.yaml:\n"
+                    "homeassistant:\n"
+                    "  packages:\n"
+                    "    broadlink_manager: !include broadlink_manager/package.yaml"
+                )
+                return result
+
+            content = config_file.read_text(encoding="utf-8")
+
+            # Check if the include is already present
+            # Match patterns like: broadlink_manager: !include broadlink_manager/package.yaml
+            # or broadlink_manager: !include_dir_named broadlink_manager
+            include_pattern = re.compile(
+                r"broadlink_manager\s*:\s*!include.*broadlink_manager",
+                re.IGNORECASE,
+            )
+            if include_pattern.search(content):
+                result["already_present"] = True
+                logger.info(
+                    "configuration.yaml already includes broadlink_manager package"
+                )
+                return result
+
+            # Also check if there's a packages: !include_dir_named that would cover it
+            # (e.g., packages: !include_dir_named packages/)
+            include_dir_pattern = re.compile(
+                r"packages\s*:\s*!include_dir_named", re.IGNORECASE
+            )
+            if include_dir_pattern.search(content):
+                # User has a packages directory setup - they should use package_output_path
+                result["already_present"] = False
+                result["instructions"] = (
+                    "Your configuration.yaml uses !include_dir_named for packages. "
+                    "Set the 'package_output_path' option to write package.yaml "
+                    "to your packages directory, or manually add:\n"
+                    "homeassistant:\n"
+                    "  packages:\n"
+                    "    broadlink_manager: !include broadlink_manager/package.yaml"
+                )
+                return result
+
+            # Need to add the include. Try to add it to existing homeassistant: section
+            # or create a new one.
+            lines = content.split("\n")
+            ha_section_idx = None
+            packages_idx = None
+
+            for i, line in enumerate(lines):
+                # Match top-level "homeassistant:" (no leading whitespace)
+                if re.match(r"^homeassistant\s*:", line):
+                    ha_section_idx = i
+                # Match "packages:" under homeassistant (indented)
+                if ha_section_idx is not None and re.match(r"^\s+packages\s*:", line):
+                    packages_idx = i
+                    break
+
+            if packages_idx is not None:
+                # Add our include under existing packages: section
+                # Find the indentation of existing package entries
+                indent = "    "  # default 4 spaces
+                for j in range(packages_idx + 1, len(lines)):
+                    line = lines[j]
+                    if line.strip() == "":
+                        continue
+                    if re.match(r"^\s+\S", line):
+                        # Found an existing entry - match its indentation
+                        indent = line[: len(line) - len(line.lstrip())]
+                        break
+                    # If we hit a top-level key, we've gone past the packages section
+                    if re.match(r"^\S", line):
+                        break
+
+                # Insert after the packages: line (and any blank lines)
+                insert_idx = packages_idx + 1
+                while insert_idx < len(lines) and lines[insert_idx].strip() == "":
+                    insert_idx += 1
+
+                lines.insert(
+                    insert_idx,
+                    f"{indent}broadlink_manager: !include broadlink_manager/package.yaml",
+                )
+            elif ha_section_idx is not None:
+                # Add packages: section under existing homeassistant:
+                # Find the indentation of existing entries under homeassistant:
+                indent = "  "  # default 2 spaces
+                for j in range(ha_section_idx + 1, len(lines)):
+                    line = lines[j]
+                    if line.strip() == "":
+                        continue
+                    if re.match(r"^\s+\S", line):
+                        indent = line[: len(line) - len(line.lstrip())]
+                        break
+                    if re.match(r"^\S", line):
+                        break
+
+                # Insert packages section after homeassistant: line
+                insert_idx = ha_section_idx + 1
+                lines.insert(insert_idx, "")
+                lines.insert(insert_idx + 1, f"{indent}packages:")
+                lines.insert(
+                    insert_idx + 2,
+                    f"{indent}  broadlink_manager: !include broadlink_manager/package.yaml",
+                )
+            else:
+                # No homeassistant: section - add one at the end
+                if content and not content.endswith("\n"):
+                    lines.append("")
+                lines.append("")
+                lines.append("homeassistant:")
+                lines.append("  packages:")
+                lines.append(
+                    "    broadlink_manager: !include broadlink_manager/package.yaml"
+                )
+
+            new_content = "\n".join(lines)
+            config_file.write_text(new_content, encoding="utf-8")
+            result["added"] = True
+            logger.info("Added broadlink_manager package include to configuration.yaml")
+            return result
+
+        except Exception as e:
+            logger.error(f"Error ensuring package include: {e}", exc_info=True)
+            result["error"] = str(e)
+            result["instructions"] = (
+                "Could not automatically update configuration.yaml. "
+                "Please manually add:\n"
+                "homeassistant:\n"
+                "  packages:\n"
+                "    broadlink_manager: !include broadlink_manager/package.yaml"
+            )
+            return result
 
     async def _reload_broadlink_config(self) -> bool:
         """Reload Broadlink integration configuration without restarting HA"""

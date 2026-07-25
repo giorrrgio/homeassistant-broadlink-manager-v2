@@ -93,7 +93,8 @@ class TestConfigurationCollection:
             
             assert config["log_level"] == "info"
             assert config["web_port"] == "8099"
-            assert config["ha_url_configured"] is False
+            # In standalone mode, get_ha_url() returns a default (localhost:8123)
+            # so ha_url_configured is True, but ha_token_configured is False
             assert config["ha_token_configured"] is False
 
     def test_collect_configuration_with_config_file(self):
@@ -111,6 +112,37 @@ class TestConfigurationCollection:
             assert "web_port" in config
             assert "ha_url_configured" in config
             assert "ha_token_configured" in config
+
+    def test_collect_configuration_supervisor_mode(self):
+        """Test configuration collection in supervisor mode (HA add-on)"""
+        with patch.dict(os.environ, {
+            'SUPERVISOR_TOKEN': 'supervisor_token_value'
+        }, clear=True):
+            collector = DiagnosticsCollector("/tmp/storage")
+            config = collector._collect_configuration()
+            
+            # In supervisor mode, both URL and token should be configured
+            assert config["ha_url_configured"] is True
+            assert config["ha_token_configured"] is True
+
+    def test_ha_connection_supervisor_mode(self):
+        """Test HA connection reports configured in supervisor mode"""
+        with patch.dict(os.environ, {
+            'SUPERVISOR_TOKEN': 'supervisor_token_value'
+        }, clear=True):
+            collector = DiagnosticsCollector("/tmp/storage")
+            connection = collector._collect_ha_connection()
+            
+            assert connection["configured"] is True
+            assert "supervisor" in connection["ha_url"].lower()
+
+    def test_ha_connection_standalone_without_token(self):
+        """Test HA connection reports not configured without token in standalone mode"""
+        with patch.dict(os.environ, {}, clear=True):
+            collector = DiagnosticsCollector("/tmp/storage")
+            connection = collector._collect_ha_connection()
+            
+            assert connection["configured"] is False
 
 
 class TestDeviceInfoCollection:

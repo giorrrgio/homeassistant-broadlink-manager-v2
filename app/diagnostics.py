@@ -132,17 +132,36 @@ class DiagnosticsCollector:
             logger.error(f"Error collecting dependencies: {e}")
             return {"error": str(e)}
 
+    def _get_config_loader(self):
+        """Get ConfigLoader instance, preferring web_server's, else create one"""
+        if self.web_server and hasattr(self.web_server, "config_loader"):
+            return self.web_server.config_loader
+        try:
+            from config_loader import ConfigLoader
+
+            return ConfigLoader()
+        except Exception:
+            return None
+
     def _collect_configuration(self) -> Dict[str, Any]:
         """Collect configuration (sanitized)"""
         try:
+            config_loader = self._get_config_loader()
+            if config_loader:
+                ha_url_configured = bool(config_loader.get_ha_url())
+                ha_token_configured = bool(config_loader.get_ha_token())
+            else:
+                ha_url_configured = bool(os.environ.get("HA_URL"))
+                ha_token_configured = bool(os.environ.get("HA_TOKEN"))
+
             config = {
                 "storage_path": str(self.storage_path),
                 "storage_path_exists": self.storage_path.exists(),
                 "log_level": os.environ.get("LOG_LEVEL", "info"),
                 "web_port": os.environ.get("WEB_PORT", "8099"),
                 "auto_discover": os.environ.get("AUTO_DISCOVER", "true"),
-                "ha_url_configured": bool(os.environ.get("HA_URL")),
-                "ha_token_configured": bool(os.environ.get("HA_TOKEN")),
+                "ha_url_configured": ha_url_configured,
+                "ha_token_configured": ha_token_configured,
             }
 
             # Check if config.yaml exists
@@ -280,11 +299,25 @@ class DiagnosticsCollector:
         try:
             import asyncio
 
+            config_loader = self._get_config_loader()
+            if config_loader:
+                ha_url = config_loader.get_ha_url()
+                ha_token = config_loader.get_ha_token()
+                configured = bool(ha_url and ha_token)
+                # Show sanitized URL (hide token for security)
+                if config_loader.is_supervisor:
+                    ha_url_display = "http://supervisor/core (supervisor mode)"
+                else:
+                    ha_url_display = ha_url or "not configured"
+            else:
+                ha_url = os.environ.get("HA_URL")
+                ha_token = os.environ.get("HA_TOKEN")
+                configured = bool(ha_url and ha_token)
+                ha_url_display = ha_url or "not configured"
+
             connection = {
-                "configured": bool(
-                    os.environ.get("HA_URL") and os.environ.get("HA_TOKEN")
-                ),
-                "ha_url": os.environ.get("HA_URL", "not configured"),
+                "configured": configured,
+                "ha_url": ha_url_display,
                 "connection_test": "not tested",
                 "ha_version": None,
                 "websocket_connected": False,
@@ -743,6 +776,7 @@ class DiagnosticsCollector:
             lines.append(
                 f"- **Configured:** {'✅' if ha_conn.get('configured') else '❌'}"
             )
+            lines.append(f"- **HA URL:** {ha_conn.get('ha_url', 'not configured')}")
             if ha_conn.get("configured"):
                 lines.append(
                     f"- **Connection Test:** {ha_conn.get('connection_test', 'not tested')}"
