@@ -654,9 +654,11 @@ class EntityGenerator:
                         "target": {"entity_id": broadlink_entity},
                         "data": {
                             "command": (
-                                "{% if brightness > states('input_number."
+                                "{% if brightness > (states('input_number."
                                 + sanitized_id
-                                + "_brightness') | int %}\n"
+                                + "_brightness') | int * 255 / "
+                                + str(brightness_steps)
+                                + ") | int %}\n"
                                 f"  b64:{brightness_up_cmd}\n"
                                 "{% else %}\n"
                                 f"  b64:{brightness_down_cmd}\n"
@@ -677,9 +679,11 @@ class EntityGenerator:
                         "target": {"entity_id": broadlink_entity},
                         "data": {
                             "command": (
-                                "{% if brightness > states('input_number."
+                                "{% if brightness > (states('input_number."
                                 + sanitized_id
-                                + "_brightness') | int %}\n"
+                                + "_brightness') | int * 255 / "
+                                + str(brightness_steps)
+                                + ") | int %}\n"
                                 f"  b64:{bright_cmd}\n"
                                 "{% else %}\n"
                                 f"  b64:{dim_cmd}\n"
