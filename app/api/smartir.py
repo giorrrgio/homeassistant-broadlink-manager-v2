@@ -742,6 +742,24 @@ def init_smartir_routes(smartir_detector, smartir_code_service=None):
             with open(file_path, "r", encoding="utf-8") as f:
                 profile_data = json.load(f)
 
+            # If profile is builtin (only in codes/), copy it to custom_codes/
+            # so that command learning and polling can find and update it.
+            if source == "builtin":
+                try:
+                    custom_codes_dir = custom_file_path.parent
+                    custom_codes_dir.mkdir(parents=True, exist_ok=True)
+                    with open(custom_file_path, "w", encoding="utf-8") as f:
+                        json.dump(profile_data, f, indent=2, ensure_ascii=False)
+                    logger.info(
+                        f"📋 Copied builtin profile {code}.json from codes/ to custom_codes/ for editing"
+                    )
+                    file_path = custom_file_path
+                    source = "custom"
+                except Exception as copy_err:
+                    logger.warning(
+                        f"⚠️ Could not copy builtin profile to custom_codes/: {copy_err}"
+                    )
+
             return (
                 jsonify(
                     {

@@ -222,10 +222,19 @@ def learn_command():
                             Path(config_path) / "custom_components" / "smartir"
                         )
                         custom_codes_path = smartir_path / "custom_codes"
+                        codes_path = smartir_path / "codes"
 
-                        if custom_codes_path.exists():
-                            # Scan all platforms for matching profile
-                            for platform_dir in custom_codes_path.iterdir():
+                        # Scan both custom_codes/ and codes/ for matching profile
+                        # custom_codes/ is checked first; codes/ is a fallback for
+                        # built-in profiles that haven't been copied yet.
+                        for base_path, base_label in [
+                            (custom_codes_path, "custom_codes"),
+                            (codes_path, "codes"),
+                        ]:
+                            if not base_path.exists() or smartir_metadata:
+                                continue
+
+                            for platform_dir in base_path.iterdir():
                                 if platform_dir.is_dir():
                                     platform = platform_dir.name
                                     for profile_file in platform_dir.glob("*.json"):
@@ -254,10 +263,41 @@ def learn_command():
                                             # Check if this profile matches the device being learned
                                             if profile_device_name == device.lower():
                                                 device_code = profile_file.stem
+
+                                                # If found in codes/, copy to
+                                                # custom_codes/ so learning/polling
+                                                # can update it there.
+                                                target_path = profile_file
+                                                if base_label == "codes":
+                                                    custom_dir = (
+                                                        custom_codes_path / platform
+                                                    )
+                                                    custom_dir.mkdir(
+                                                        parents=True, exist_ok=True
+                                                    )
+                                                    target_path = (
+                                                        custom_dir / profile_file.name
+                                                    )
+                                                    with open(
+                                                        target_path,
+                                                        "w",
+                                                        encoding="utf-8",
+                                                    ) as wf:
+                                                        json.dump(
+                                                            profile_data,
+                                                            wf,
+                                                            indent=2,
+                                                            ensure_ascii=False,
+                                                        )
+                                                    logger.info(
+                                                        f"📋 Copied builtin profile "
+                                                        f"{device_code}.json from "
+                                                        f"codes/ to custom_codes/ "
+                                                        f"for learning"
+                                                    )
+
                                                 smartir_metadata = {
-                                                    "smartir_profile": str(
-                                                        profile_file
-                                                    ),
+                                                    "smartir_profile": str(target_path),
                                                     "device_code": device_code,
                                                     "platform": platform,
                                                 }

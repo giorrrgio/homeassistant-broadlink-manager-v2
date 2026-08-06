@@ -2214,10 +2214,20 @@ class BroadlinkWebServer:
                                 self.config_path / "custom_components" / "smartir"
                             )
                             custom_codes_path = smartir_path / "custom_codes"
+                            codes_path = smartir_path / "codes"
 
-                            if custom_codes_path.exists():
+                            # Scan both custom_codes/ and codes/ for pending commands.
+                            # codes/ is a fallback for built-in profiles that haven't
+                            # been copied to custom_codes/ yet.
+                            for scan_path, scan_label in [
+                                (custom_codes_path, "custom_codes"),
+                                (codes_path, "codes"),
+                            ]:
+                                if not scan_path.exists():
+                                    continue
+
                                 # Scan each platform directory (climate, fan, media_player, light)
-                                for platform_dir in custom_codes_path.iterdir():
+                                for platform_dir in scan_path.iterdir():
                                     if platform_dir.is_dir():
                                         platform = platform_dir.name
 
@@ -2258,6 +2268,41 @@ class BroadlinkWebServer:
                                                             device_name,
                                                         )
 
+                                                        # If found in codes/, copy to
+                                                        # custom_codes/ so polling can
+                                                        # update it there.
+                                                        target_path = profile_file
+                                                        if scan_label == "codes":
+                                                            custom_dir = (
+                                                                custom_codes_path
+                                                                / platform
+                                                            )
+                                                            custom_dir.mkdir(
+                                                                parents=True,
+                                                                exist_ok=True,
+                                                            )
+                                                            target_path = (
+                                                                custom_dir
+                                                                / profile_file.name
+                                                            )
+                                                            with open(
+                                                                target_path,
+                                                                "w",
+                                                                encoding="utf-8",
+                                                            ) as wf:
+                                                                json.dump(
+                                                                    profile_data,
+                                                                    wf,
+                                                                    indent=2,
+                                                                    ensure_ascii=False,
+                                                                )
+                                                            logger.info(
+                                                                f"📋 Copied builtin profile "
+                                                                f"{device_code}.json from "
+                                                                f"codes/ to custom_codes/ "
+                                                                f"for polling"
+                                                            )
+
                                                         logger.info(
                                                             f"📋 Found pending SmartIR command in profile {device_code} ({platform}): {cmd_name}"
                                                         )
@@ -2274,7 +2319,7 @@ class BroadlinkWebServer:
                                                                 None,
                                                                 {
                                                                     "smartir_profile": str(
-                                                                        profile_file
+                                                                        target_path
                                                                     ),
                                                                     "device_code": device_code,
                                                                     "platform": platform,
