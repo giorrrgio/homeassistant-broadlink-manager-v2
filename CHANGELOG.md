@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+## [0.5.1-beta.3] - 2026-08-06
+
+### Fixed
+- Fix: brightness down never fires with fewer than 100 brightness steps
+
+
 ## [0.5.1-beta.2] - 2026-08-06
 
 ### Fixed
