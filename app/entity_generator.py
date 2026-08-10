@@ -648,6 +648,18 @@ class EntityGenerator:
                     commands["brightness_down"], ""
                 )
 
+                # Calculate step difference for num_repeats
+                # target_steps = (brightness * N / 255) | int
+                # current_steps = states('input_number.{id}_brightness') | int
+                # num_repeats = |target_steps - current_steps|
+                num_repeats_template = (
+                    "{{ ((brightness * "
+                    + str(brightness_steps)
+                    + " / 255) | int - states('input_number."
+                    + sanitized_id
+                    + "_brightness') | int) | abs }}"
+                )
+
                 brightness_actions.append(
                     {
                         "action": "remote.send_command",
@@ -663,7 +675,9 @@ class EntityGenerator:
                                 "{% else %}\n"
                                 f"  b64:{brightness_down_cmd}\n"
                                 "{% endif %}"
-                            )
+                            ),
+                            "num_repeats": num_repeats_template,
+                            "delay_secs": 0.5,
                         },
                     }
                 )
@@ -672,6 +686,15 @@ class EntityGenerator:
                     commands["bright"], ""
                 )
                 dim_cmd = broadlink_commands.get(device, {}).get(commands["dim"], "")
+
+                # Calculate step difference for num_repeats
+                num_repeats_template = (
+                    "{{ ((brightness * "
+                    + str(brightness_steps)
+                    + " / 255) | int - states('input_number."
+                    + sanitized_id
+                    + "_brightness') | int) | abs }}"
+                )
 
                 brightness_actions.append(
                     {
@@ -688,7 +711,9 @@ class EntityGenerator:
                                 "{% else %}\n"
                                 f"  b64:{dim_cmd}\n"
                                 "{% endif %}"
-                            )
+                            ),
+                            "num_repeats": num_repeats_template,
+                            "delay_secs": 0.5,
                         },
                     }
                 )
